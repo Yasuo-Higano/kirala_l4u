@@ -20,6 +20,14 @@ In the benchmark (tarai 12 6 0), I compared it with MAL's impls/c,erlang,elixir,
 - 2 to 4 times faster than ruby
 I think this implementation is not so bad.
 
+## development environment
+- Erlang/OTP 26
+- Gleam 0.33.0-rc1
+
+## build
+```
+./build.sh
+```
 
 ## embedding sample
 
