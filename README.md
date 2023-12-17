@@ -92,5 +92,5 @@ Creating qdate ETS Table: qdate_srv
 (global-keys :test)
 
 ; Call the function and start the REPL the same way you did in erlang.
-(test_l4u:main)
+(test-l4u:main)
 ```
