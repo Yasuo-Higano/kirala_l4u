@@ -1,0 +1,16 @@
+(load-file      "../lib/load-file-once.l4u")
+(load-file-once "../lib/trivial.l4u")
+;=>nil
+
+(inc 12)
+;=>13
+(dec 12)
+;=>11
+(zero? 12)
+;=>false
+(zero? 0)
+;=>true
+(identity 12)
+;=>12
+(= (gensym) (gensym))
+;=>false

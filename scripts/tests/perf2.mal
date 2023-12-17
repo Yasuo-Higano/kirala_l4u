@@ -1,0 +1,11 @@
+(load-file      "../lib/load-file-once.l4u")
+(load-file-once "../tests/computations.l4u") ; fib sumdown
+(load-file-once "../lib/perf.l4u")           ; time
+
+;;(prn "Start: basic math/recursion test")
+
+(time (do
+  (sumdown 10)
+  (fib 12)))
+
+;;(prn "Done: basic math/recursion test")

@@ -1,0 +1,18 @@
+(load-file      "../lib/load-file-once.l4u")
+(load-file-once "../tests/computations.l4u")
+(load-file-once "../lib/memoize.l4u")
+;=>nil
+
+(def! N 32)
+
+;; Benchmark naive 'fib'
+
+(def! r1 (fib N))                       ; Should be slow
+
+;; Benchmark memoized 'fib'
+
+(def! fib (memoize fib))
+(def! r2 (fib N))                       ; Should be quick
+
+(= r1 r2)
+;=>true

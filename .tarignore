@@ -1,0 +1,13 @@
+*.beam
+*.ez
+build/*
+erl_crash.dump
+.local_bash_history
+.clj-kondo/*
+.lsp/*
+result*.txt
+.asdf/*
+rebar3*
+.cache/*
+
+

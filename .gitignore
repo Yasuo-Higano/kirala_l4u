@@ -1,0 +1,15 @@
+*.beam
+*.ez
+build
+erl_crash.dump
+.local_bash_history
+.clj-kondo
+.lsp
+result*.txt
+.asdf
+rebar3*
+.cache
+l4u_resources.mjs
+l4u@resources.erl
+*.gleam-
+_archive
