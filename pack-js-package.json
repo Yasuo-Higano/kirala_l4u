@@ -1,0 +1,14 @@
+{
+  "name": "l4u",
+  "version": "1.0.0",
+  "source": "kirala_l4u/kirala_l4u.mjs",
+  "main": "_dist/l4u.js",
+  "module": "_dist/l4u.mjs",
+  "scripts": {
+    "watch": "parcel watch",
+    "build": "parcel build"
+  },
+  "devDependencies": {
+    "parcel": "latest"
+  }
+}

@@ -2,6 +2,7 @@
 -behavior(gen_server).
 -compile(export_all).
 -record(state, {env}).
+-define(DEFAULT_TIMEOUT, infinity).
 
 %%
 %% Public API
@@ -18,14 +19,16 @@ new_process(Initializer) ->
 % fn() -> WithEnv(expr,env)
 exec(Pid, Fn) ->
     %io:format("call exec: ~p~n", [Fn]),
-    gen_server:call(Pid, {exec, Fn}).
+    gen_server:call(Pid, {exec, Fn},?DEFAULT_TIMEOUT).
 
+% Fn(Env) -> Value
+% exec_native(Pid, Fn) -> Result(Value,Error)
 exec_native(Pid, Fn) ->
     %io:format("call exec: ~p~n", [Fn]),
-    gen_server:call(Pid, {native_exec, Fn}).
+    gen_server:call(Pid, {native_exec, Fn},?DEFAULT_TIMEOUT).
 
 get_env(Pid) ->
-    {ok,Env} = gen_server:call(Pid, get_env),
+    {ok,Env} = gen_server:call(Pid, get_env,?DEFAULT_TIMEOUT),
     Env.
 
 %%

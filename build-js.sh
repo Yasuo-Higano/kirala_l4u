@@ -6,4 +6,5 @@ cd $SCRIPT_DIR
 clear
 ./embed_resource.sh
 
-gleam build
+gleam build --target javascript
+

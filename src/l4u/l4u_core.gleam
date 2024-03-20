@@ -3,26 +3,36 @@
 // latest
 import gleam/io
 import gleam/list
-import gleam/map.{Map}
+import gleam/dict.{type Dict}
 import gleam/string
-import gleam/regex.{Regex}
+import gleam/regex
 import gleam/result
 import gleam/int
 import gleam/float
-import gleam/dynamic.{Dynamic}
-import gleam/option.{None, Option, Some}
-import gleam/order.{Eq, Gt, Lt, Order}
+import gleam/dynamic
+import gleam/option
+import gleam/order.{type Order, Eq, Gt, Lt}
 import l4u/sys_bridge.{
-  PDic, Pid, Ref, aux_pdic, catch_ex, compare_any, console_readline,
-  console_writeln, dbgout1, dbgout2, dbgout3, deref, do_async, error_to_string,
+  aux_pdic, catch_ex, compare_any, console_readline, console_writeln, dbgout1,
+  dbgout2, dbgout3, deref, do_async, erl_sym, error_to_string,
   escape_binary_string, external_form, internal_form, load_file, make_ref,
   process_dict_erase, process_dict_get, process_dict_keys, process_dict_set,
   reset_ref, tco_loop, throw_err, throw_expr, tick_count, to_string,
-  unescape_binary_string, unique_int, unique_str, unsafe_corece,
+  unescape_binary_string, unique_int, unique_pdic, unique_str,
 }
 @target(javascript)
 import gleam/javascript/promise
 import l4u/l4u_util
+import l4u/l4u_type.{
+  type Env, type Expr, type Info, type PDic, type Scope, ATOM, BIF, BISPFORM,
+  CLOSURE, Continuation, CustomType, CustomTypeDef, DELIMITER, DICT, Description,
+  Env, EnvOptions, ExVAR, FALSE, FLOAT, INT, Info, KEYWORD, LIST,
+  LocalContinuation, MACRO, NIL, NativeFunction, PRINTABLE, ProcessDict, STRING,
+  SYMBOL, Scope, TRUE, UNDEFINED, VECTOR, WithEnv, WithMeta, native_false,
+  native_nil, native_true, native_undefined, to_native_dictionary, unsafe_corece,
+}
+import gleam_bridge
+import l4u/union_term
 
 const gdb__ = True
 
@@ -46,80 +56,6 @@ const scope_type__ = ScopeTypeOverwriteLocal
 
 //const scope_type__ = ScopeTypeSimpleScopes
 //const scope_type__ = ScopeTypeOptScopes
-
-// ----------------------------------------------------------------------------
-// # types
-// ----------------------------------------------------------------------------
-
-pub type ErrorEx {
-  ErrorEx2(msg: String, detail: Dynamic)
-}
-
-pub type Info {
-  Info(name: String, level: Int)
-}
-
-pub type Description {
-  Description(name: String, text: String)
-}
-
-pub type Scope {
-  Scope(bindings: Map(String, Expr))
-  ProcessDict(PDic)
-}
-
-pub type EnvOptions {
-  EnvOptions(verbose: Bool, trace: Bool)
-}
-
-pub type EnvOption {
-  VERBOSE
-  TRACE
-}
-
-pub type Env {
-  Env(
-    info: Info,
-    pdic: PDic,
-    local_vars: Map(String, Expr),
-    a_binding: Map(String, Expr),
-    scopes: List(Scope),
-    opts: EnvOptions,
-  )
-}
-
-pub type Expr {
-  PRINTABLE(Expr)
-  UNDEFINED
-  NIL
-  TRUE
-  FALSE
-  DELIMITER
-  WithEnv(Expr, Env)
-  LocalContinuation(List(Expr), Env, Env)
-  Continuation(List(Expr), Env)
-  ATOM(Ref)
-  INT(Int)
-  FLOAT(Float)
-  STRING(String)
-  SYMBOL(String)
-  KEYWORD(String)
-  LIST(List(Expr))
-  VECTOR(List(Expr))
-  DICT(List(Expr))
-  BIF(Description, fn(List(Expr), Env) -> Expr)
-  BISPFORM(Description, fn(List(Expr), Env) -> Expr)
-
-  CLOSURE(Description, List(String), List(Expr), Env)
-  MACRO(Description, List(String), List(Expr), Env)
-
-  WithMeta(Expr, Expr)
-  NativeValue(String, Dynamic)
-  NativeFunction(String, Dynamic)
-  ReplCommand(String, Expr)
-  CustomType(String, Expr)
-  CustomTypeDef(String, Expr)
-}
 
 pub fn to_l4u_bool(flag: Bool) -> Expr {
   case flag {
@@ -288,7 +224,7 @@ pub fn tokenize(src: String, env: Env) -> List(String) {
     })
     |> list.flatten
 
-  //dbgout2("lines:", lines)
+  //dbgout2("# lines:", lines)
 
   lines
 }
@@ -346,8 +282,8 @@ fn apply_macro_(expr: Expr, env: Env) -> Expr {
   case expr {
     LIST([SYMBOL(callable), ..args] as exprs) -> {
       case env_get(env, callable) {
-        Ok(MACRO(..) as macro) -> {
-          let assert WithEnv(new_expr, new_env) = apply(env, macro, args)
+        Ok(MACRO(..) as macroval) -> {
+          let assert WithEnv(new_expr, new_env) = apply(env, macroval, args)
           new_expr
         }
 
@@ -365,8 +301,8 @@ fn apply_macro_1(expr: Expr, env: Env) -> Expr {
   case expr {
     LIST([SYMBOL(callable), ..args] as exprs) -> {
       case env_get(env, callable) {
-        Ok(MACRO(..) as macro) -> {
-          let assert WithEnv(new_expr, new_env) = apply(env, macro, args)
+        Ok(MACRO(..) as macroval) -> {
+          let assert WithEnv(new_expr, new_env) = apply(env, macroval, args)
           new_expr
         }
 
@@ -391,7 +327,18 @@ pub fn intern_symbol(str: String) -> Expr {
     "nil" -> NIL
     "true" -> TRUE
     "false" -> FALSE
-    _ -> SYMBOL(str)
+    //_ -> SYMBOL(str)
+    _ -> {
+      let new_key = erl_sym(str)
+      case union_term.nt_get_with_default(new_key, UNDEFINED) {
+        UNDEFINED -> {
+          let new_symbol = SYMBOL(str)
+          union_term.nt_put(new_key, new_symbol)
+          new_symbol
+        }
+        interened_symbol -> interened_symbol
+      }
+    }
   }
 }
 
@@ -404,9 +351,17 @@ pub fn intern_keyword(str: String) -> Expr {
 }
 
 pub fn intern_symbol_or_keyword(str: String) -> Expr {
-  case string.starts_with(str, ":") {
-    True -> intern_keyword(str)
-    False -> intern_symbol(str)
+  //case string.starts_with(str, ":") {
+  //  True -> intern_keyword(str)
+  //  False -> intern_symbol(str)
+  //}
+
+  case string.pop_grapheme(str) {
+    Ok(#(":", rest)) -> intern_keyword(rest)
+    Ok(#("$", rest)) -> {
+      ExVAR("external", rest)
+    }
+    _ -> intern_symbol(str)
   }
 }
 
@@ -559,11 +514,11 @@ pub fn eval(exprs: List(Expr), result: Expr, env: Env) -> Expr {
       }
 
       [Continuation(progn, new_env) as ret] -> {
-        error(#(progn, undefined, new_env))
+        Error(#(progn, UNDEFINED, new_env))
       }
 
       [LocalContinuation(progn, new_env, next_env) as ret] -> {
-        error(#(progn, undefined, new_env))
+        Error(#(progn, UNDEFINED, new_env))
       }
 
       // tail call optimization(TCO)
@@ -648,23 +603,27 @@ pub fn eval_funcall_args(exprs: List(Expr), env: Env) -> #(List(Expr), Env) {
 }
 
 fn bind_args(
-  bindings: Map(String, Expr),
+  bindings: Dict(String, Expr),
   params: List(String),
   args: List(Expr),
-) -> Map(String, Expr) {
+) -> Dict(String, Expr) {
   //dbgout3("bind_args:", params, args)
   case params, args {
     [], [] -> bindings
     ["&", sym_rest], rest_args -> {
-      map.insert(bindings, sym_rest, LIST(rest_args))
+      dict.insert(bindings, sym_rest, LIST(rest_args))
     }
     //[param], [] -> {
     //  io.println("[param],[]")
-    //  //map.insert(bindings, param, NIL)
-    //  map.insert(bindings, param, LIST([]))
+    //  //dict.insert(bindings, param, NIL)
+    //  dict.insert(bindings, param, LIST([]))
     //}
     [param, ..rest_params], [arg, ..rest_args] -> {
-      bind_args(map.insert(bindings, param, arg), rest_params, rest_args)
+      bind_args(dict.insert(bindings, param, arg), rest_params, rest_args)
+    }
+    _, _ -> {
+      throw_err("unhandable args")
+      bindings
     }
   }
 }
@@ -699,31 +658,31 @@ pub fn eval_expr(expr: Expr, env: Env) -> Expr {
 fn generate_local_env__overwrite_local(
   name: String,
   env: Env,
-  bindings: Map(String, Expr),
-  a_bindings: Map(String, Expr),
+  bindings: Dict(String, Expr),
+  a_bindings: Dict(String, Expr),
 ) -> Env {
   Env(
     ..env,
     info: Info(name, env.info.level + 1),
-    local_vars: map.merge(env.local_vars, bindings),
-    a_binding: map.merge(env.a_binding, a_bindings),
+    local_vars: dict.merge(env.local_vars, bindings),
+    a_binding: dict.merge(env.a_binding, a_bindings),
   )
 }
 
 fn generate_local_env__opt_scopes(
   name: String,
   env: Env,
-  bindings: Map(String, Expr),
-  a_bindings: Map(String, Expr),
+  bindings: Dict(String, Expr),
+  a_bindings: Dict(String, Expr),
 ) -> Env {
-  case map.size(bindings) {
+  case dict.size(bindings) {
     0 -> env
     _ -> {
       Env(
         ..env,
         info: Info(name, env.info.level + 1),
         local_vars: bindings,
-        a_binding: map.merge(env.a_binding, a_bindings),
+        a_binding: dict.merge(env.a_binding, a_bindings),
         scopes: [Scope(env.local_vars), ..env.scopes],
       )
     }
@@ -733,14 +692,14 @@ fn generate_local_env__opt_scopes(
 fn generate_local_env__simple_scope(
   name: String,
   env: Env,
-  bindings: Map(String, Expr),
-  a_bindings: Map(String, Expr),
+  bindings: Dict(String, Expr),
+  a_bindings: Dict(String, Expr),
 ) -> Env {
   Env(
     ..env,
     info: Info(name, env.info.level + 1),
     local_vars: bindings,
-    a_binding: map.merge(env.a_binding, a_bindings),
+    a_binding: dict.merge(env.a_binding, a_bindings),
     scopes: [Scope(env.local_vars), ..env.scopes],
   )
 }
@@ -748,8 +707,8 @@ fn generate_local_env__simple_scope(
 fn generate_local_env(
   name: String,
   env: Env,
-  bindings: Map(String, Expr),
-  a_bindings: Map(String, Expr),
+  bindings: Dict(String, Expr),
+  a_bindings: Dict(String, Expr),
 ) -> Env {
   case scope_type__ {
     ScopeTypeOverwriteLocal -> {
@@ -765,6 +724,7 @@ fn generate_local_env(
 }
 
 @external(erlang, "l4u@bif_lib", "invoke_native_function")
+@external(javascript, "../l4u_bif_lib_ffi.mjs", "invoke_native_function")
 fn invoke_native_function(nt_fun: Expr, args: List(Expr)) -> Expr
 
 // LIST(fn,arg1,arg2,...): 関数実行
@@ -806,7 +766,7 @@ fn eval_expr_(expr: Expr, env: Env) -> Expr {
           let #(eargs, new_env) = eval_funcall_args(args, new_env)
 
           // closureの引数を束縛する
-          let bindings = bind_args(map.from_list([]), params, eargs)
+          let bindings = bind_args(dict.from_list([]), params, eargs)
           //let bindings = bind_args(closure_env.local_vars, params, eargs)
           let ip =
             trace_closure_call(closure_env, callable, ecallable, bindings)
@@ -832,7 +792,7 @@ fn eval_expr_(expr: Expr, env: Env) -> Expr {
         }
         // call macro
         MACRO(info, params, progn, macro_env) -> {
-          let bindings = map.from_list([])
+          let bindings = dict.from_list([])
           //let #(eargs, new_env) = eval_contents(args, [], new_env)
           let bindings = bind_args(bindings, params, args)
 
@@ -867,6 +827,23 @@ fn eval_expr_(expr: Expr, env: Env) -> Expr {
         }
         _ -> {
           throw_err("'" <> sym <> "' not found")
+          WithEnv(UNDEFINED, env)
+        }
+      }
+    }
+    ExVAR(etype, esym) -> {
+      case union_term.get_with_default(etype, UNDEFINED) {
+        UNDEFINED -> {
+          throw_err("'" <> etype <> "' not found")
+          WithEnv(UNDEFINED, env)
+        }
+        CLOSURE(..) as f -> {
+          let expr = LIST([f, STRING(esym)])
+          //dbgout2("ExVAR:", expr)
+          eval_expr(expr, env)
+        }
+        unhandable -> {
+          throw_err("unhandable exp in eval_expr")
           WithEnv(UNDEFINED, env)
         }
       }
@@ -913,7 +890,9 @@ pub fn print(expr: Expr) -> String {
     FALSE -> "false"
     FLOAT(val) -> float.to_string(val)
     INT(val) -> int.to_string(val)
-    STRING(val) -> "\"" <> escape_binary_string(val) <> "\""
+    STRING(val) -> {
+      "\"" <> escape_binary_string(val) <> "\""
+    }
     SYMBOL(val) -> val
     KEYWORD(val) -> ":" <> val
     DELIMITER -> ""
@@ -928,7 +907,11 @@ pub fn print(expr: Expr) -> String {
     }
     CLOSURE(desc, params, body, closure_env) -> {
       let body = list.map(body, fn(e) { print(e) })
-      "(fn* (" <> string.join(params, " ") <> ") " <> string.join(body, " ") <> ")"
+      "(fn* ("
+      <> string.join(params, " ")
+      <> ") "
+      <> string.join(body, " ")
+      <> ")"
     }
     ATOM(ref) -> "(atom " <> print(deref(ref)) <> ")"
     BIF(desc, ..) -> desc.name
@@ -966,7 +949,11 @@ pub fn pstr(expr: Expr) -> String {
     }
     CLOSURE(desc, params, body, closure_env) -> {
       let body = list.map(body, fn(e) { print(e) })
-      "(fn* (" <> string.join(params, " ") <> ") " <> string.join(body, " ") <> ")"
+      "(fn* ("
+      <> string.join(params, " ")
+      <> ") "
+      <> string.join(body, " ")
+      <> ")"
     }
     ATOM(..) -> "#<atom>"
     BIF(desc, ..) -> desc.name
@@ -1004,7 +991,11 @@ pub fn show(expr: Expr) -> String {
     }
     CLOSURE(desc, params, body, closure_env) -> {
       let body = list.map(body, fn(e) { print(e) })
-      "(fn* (" <> string.join(params, " ") <> ") " <> string.join(body, " ") <> ")"
+      "(fn* ("
+      <> string.join(params, " ")
+      <> ") "
+      <> string.join(body, " ")
+      <> ")"
     }
     ATOM(..) -> "#<atom>"
     BIF(desc, ..) -> desc.name
@@ -1077,16 +1068,25 @@ pub fn inspect(expr: Expr) -> String {
     }
     CLOSURE(desc, params, body, closure_env) -> {
       let body = list.map(body, fn(e) { print(e) })
-      "(CLOSURE " <> desc.name <> " (" <> string.join(params, " ") <> ")\n  " <> string.join(
-        body,
-        " ",
-      ) <> ")" <> "\n    " <> dump_local_vars(closure_env) <> "\n    " <> dump_scopes_keys(
-        closure_env.scopes,
-      )
+      "(CLOSURE "
+      <> desc.name
+      <> " ("
+      <> string.join(params, " ")
+      <> ")\n  "
+      <> string.join(body, " ")
+      <> ")"
+      <> "\n    "
+      <> dump_local_vars(closure_env)
+      <> "\n    "
+      <> dump_scopes_keys(closure_env.scopes)
     }
     MACRO(info, params, body, closure_env) -> {
       let body = list.map(body, fn(e) { print(e) })
-      "(MACRO (" <> string.join(params, " ") <> ") " <> string.join(body, " ") <> ")"
+      "(MACRO ("
+      <> string.join(params, " ")
+      <> ") "
+      <> string.join(body, " ")
+      <> ")"
     }
     ATOM(ref) -> "#<atom>"
     BIF(desc, ..) -> "#<bif:" <> desc.name <> ">"
@@ -1124,17 +1124,27 @@ pub fn describe(expr: Expr) -> String {
     }
     CLOSURE(desc, params, body, closure_env) -> {
       let body = list.map(body, fn(e) { print(e) })
-      desc.text <> "\n" <> "(CLOSURE " <> desc.name <> " (" <> string.join(
-        params,
-        " ",
-      ) <> ")\n  " <> string.join(body, " ") <> ")"
+      desc.text
+      <> "\n"
+      <> "(CLOSURE "
+      <> desc.name
+      <> " ("
+      <> string.join(params, " ")
+      <> ")\n  "
+      <> string.join(body, " ")
+      <> ")"
     }
     MACRO(desc, params, body, closure_env) -> {
       let body = list.map(body, fn(e) { print(e) })
-      desc.text <> "\n" <> "(MACRO  " <> desc.name <> " (" <> string.join(
-        params,
-        " ",
-      ) <> ")\n  " <> string.join(body, " ") <> ")"
+      desc.text
+      <> "\n"
+      <> "(MACRO  "
+      <> desc.name
+      <> " ("
+      <> string.join(params, " ")
+      <> ")\n  "
+      <> string.join(body, " ")
+      <> ")"
     }
     ATOM(ref) -> "#<atom>"
     BIF(desc, ..) -> "builtin function: " <> desc.name <> "\n" <> desc.text
@@ -1436,6 +1446,10 @@ pub fn bif_global_keys(exprs: List(Expr), env: Env) -> Expr {
         env,
       )
     }
+    unhandable -> {
+      throw_err("unhandable arguments at global_keys")
+      WithEnv(UNDEFINED, env)
+    }
   }
 }
 
@@ -1470,6 +1484,10 @@ fn binds(eval_env: Env, bindings: List(Expr)) -> Env {
       let eval_env = env_set_local(eval_env, sym, eexpr)
       binds(eval_env, rest)
     }
+    unhandable -> {
+      throw_err("unhandable bindings")
+      eval_env
+    }
   }
 }
 
@@ -1485,7 +1503,7 @@ pub fn bispform_let(exprs: List(Expr), env: Env) -> Expr {
   //    Env(
   //      ..env,
   //      scopes: [Scope(env.local_vars), ..env.scopes],
-  //      local_vars: map.from_list([]),
+  //      local_vars: dict.from_list([]),
   //    )
 
   // let*を実行する環境をそのまま使う
@@ -1499,7 +1517,7 @@ pub fn bispform_let(exprs: List(Expr), env: Env) -> Expr {
     Env(..let_env, info: let_env.info, a_binding: new_local_vars)
   //generate_local_env("let", let_env, new_local_vars)
 
-  //dbgout2("### new local vars:", map.keys(new_local_vars))
+  //dbgout2("### new local vars:", dict.keys(new_local_vars))
   local_continuation(progn, new_local_env, env)
 }
 
@@ -1561,8 +1579,8 @@ fn closure_to_macro(closure: Expr) -> Expr {
 
 pub fn bispform_macro(exprs: List(Expr), env: Env) -> Expr {
   let assert WithEnv(closure, new_env) = bispform_fn(exprs, env)
-  let macro = closure_to_macro(closure)
-  WithEnv(macro, env)
+  let macroval = closure_to_macro(closure)
+  WithEnv(macroval, env)
 }
 
 // (defmacro! Symbol Expr)
@@ -1592,7 +1610,7 @@ pub fn bif_car(exprs: List(Expr), env: Env) -> Expr {
   //let assert [LIST([car, ..])] = exprs
   //WithEnv(car, env)
   case exprs {
-    [LIST(contents)] | [VECTOR(contents)] -> {
+    [LIST(contents)] | [VECTOR(contents)] | [DICT(contents)] -> {
       case contents {
         [car, ..cdr] -> WithEnv(car, env)
         [] -> WithEnv(NIL, env)
@@ -1609,7 +1627,7 @@ pub fn bif_car(exprs: List(Expr), env: Env) -> Expr {
 pub fn bif_cdr(exprs: List(Expr), env: Env) -> Expr {
   let assert [expr] = exprs
   case expr {
-    LIST(contents) | VECTOR(contents) -> {
+    LIST(contents) | VECTOR(contents) | DICT(contents) -> {
       case contents {
         //[_, ..cdr] -> WithEnv(make_container(expr, cdr), env)
         [_, ..cdr] -> WithEnv(LIST(cdr), env)
@@ -1642,12 +1660,12 @@ pub fn bif_progn(exprs: List(Expr), env: Env) -> Expr {
 // (if Condition Then Else)
 pub fn bispform_if(exprs: List(Expr), env: Env) -> Expr {
   case exprs {
-    [condition, then, else] -> {
+    [condition, then, else_clause] -> {
       let assert WithEnv(econdition, new_env) =
         eval([condition], UNDEFINED, env)
       case is_true_condition(econdition) {
         True -> continuation([then], new_env)
-        False -> continuation([else], new_env)
+        False -> continuation([else_clause], new_env)
       }
     }
     [condition, then] -> {
@@ -1683,6 +1701,7 @@ pub fn bif_println(exprs: List(Expr), env: Env) -> Expr {
   WithEnv(NIL, env)
 }
 
+@target(erlang)
 pub fn bif_readline(exprs: List(Expr), env: Env) -> Expr {
   let prompt = case exprs {
     [prompt] -> show(uneval(prompt))
@@ -1690,6 +1709,11 @@ pub fn bif_readline(exprs: List(Expr), env: Env) -> Expr {
   }
   let line = console_readline(prompt)
   WithEnv(STRING(line), env)
+}
+
+@target(javascript)
+pub fn bif_readline(exprs: List(Expr), env: Env) -> Expr {
+  WithEnv(STRING("readline is unsupported"), env)
 }
 
 pub fn bif_inspect(exprs: List(Expr), env: Env) -> Expr {
@@ -1742,6 +1766,12 @@ pub fn bif_vectorp(exprs: List(Expr), env: Env) -> Expr {
     VECTOR(_) -> WithEnv(TRUE, env)
     _ -> WithEnv(FALSE, env)
   }
+}
+
+// (to-hash-map [:a 'alpha :b 'beta])
+pub fn bif_to_hash_map(exprs: List(Expr), env: Env) -> Expr {
+  let assert [LIST(contents)] = exprs
+  WithEnv(DICT(contents), env)
 }
 
 // (hash-map :a 'alpha :b 'beta)
@@ -1837,7 +1867,7 @@ pub fn bif_numberp(exprs: List(Expr), env: Env) -> Expr {
 }
 
 pub fn bif_symbol(exprs: List(Expr), env: Env) -> Expr {
-  let [expr] = exprs
+  let assert [expr] = exprs
   let assert STRING(str) = uneval(expr)
   WithEnv(SYMBOL(str), env)
 }
@@ -2045,7 +2075,7 @@ pub fn get_macro(env: Env, ast: Expr) -> Result(Expr, String) {
   case ast {
     LIST([SYMBOL(sym), ..]) -> {
       case env_get(env, sym) {
-        Ok(MACRO(..) as macro) -> Ok(macro)
+        Ok(MACRO(..) as macroval) -> Ok(macroval)
         _ -> Error("not macro")
       }
     }
@@ -2055,8 +2085,8 @@ pub fn get_macro(env: Env, ast: Expr) -> Result(Expr, String) {
 
 pub fn macroexpand(env: Env, ast: Expr) -> Expr {
   case get_macro(env, ast) {
-    Ok(macro) -> {
-      apply_macro_1(macro, env)
+    Ok(macroval) -> {
+      apply_macro_1(macroval, env)
     }
     _ -> ast
   }
@@ -2064,8 +2094,8 @@ pub fn macroexpand(env: Env, ast: Expr) -> Expr {
 
 pub fn macroexpand_all(env: Env, ast: Expr) -> Expr {
   case get_macro(env, ast) {
-    Ok(macro) -> {
-      apply_macro(macro, env)
+    Ok(macroval) -> {
+      apply_macro(macroval, env)
     }
     _ -> ast
   }
@@ -2144,13 +2174,13 @@ fn funcall(callable: Expr, eargs: List(Expr), new_env: Env) -> Expr {
     }
     CLOSURE(name, params, progn, closure_env) -> {
       // closureに渡す引数を評価する
-      let bindings = bind_args(map.from_list([]), params, eargs)
+      let bindings = bind_args(dict.from_list([]), params, eargs)
 
       let new_closure_env =
         //  Env(
         //    ..closure_env,
         //    //info: Info(..closure_env.info),
-        //    local_vars: map.merge(bindings, closure_env.local_vars),
+        //    local_vars: dict.merge(bindings, closure_env.local_vars),
         //  )
         generate_local_env("funcall", closure_env, bindings, new_env.a_binding)
 
@@ -2258,13 +2288,13 @@ pub fn bif_with_meta(exprs: List(Expr), env: Env) -> Expr {
 
 pub fn plist_to_map(
   plist: List(Expr),
-  acc: Map(String, Expr),
-) -> Map(String, Expr) {
+  acc: Dict(String, Expr),
+) -> Dict(String, Expr) {
   //dbgout2("plist_to_map:", plist)
   case plist {
     [] -> acc
     [key, value, ..rest] -> {
-      let acc = map.insert(acc, pstr(key), value)
+      let acc = dict.insert(acc, pstr(key), value)
       plist_to_map(rest, acc)
     }
     _ -> {
@@ -2274,8 +2304,8 @@ pub fn plist_to_map(
   }
 }
 
-pub fn map_to_plist(mapdata: Map(String, Expr), acc: List(Expr)) -> List(Expr) {
-  map_to_plist_(map.to_list(mapdata), [])
+pub fn map_to_plist(mapdata: Dict(String, Expr), acc: List(Expr)) -> List(Expr) {
+  map_to_plist_(dict.to_list(mapdata), [])
 }
 
 fn map_to_plist_(plist: List(#(String, Expr)), acc: List(Expr)) -> List(Expr) {
@@ -2401,8 +2431,14 @@ pub fn bif_gensym(exprs: List(Expr), env: Env) -> Expr {
   WithEnv(SYMBOL("$" <> int.to_string(unique_int())), env)
 }
 
+@target(erlang)
 pub fn bif_time_ms(exprs: List(Expr), env: Env) -> Expr {
   WithEnv(INT(tick_count() / 1_000_000), env)
+}
+
+@target(javascript)
+pub fn bif_time_ms(exprs: List(Expr), env: Env) -> Expr {
+  WithEnv(INT(tick_count()), env)
 }
 
 pub fn bif_str(exprs: List(Expr), env: Env) -> Expr {
@@ -2459,6 +2495,10 @@ fn trace(env: Env, exprs: List(Expr), tron: Bool) -> Env {
 
       trace(env, rest, tron)
     }
+
+    _ -> {
+      env
+    }
   }
 }
 
@@ -2486,7 +2526,7 @@ pub fn bif_def_custom_type(exprs: List(Expr), env: Env) -> Expr {
   WithEnv(custom_type_def, new_env)
 }
 
-fn instanciate_custom_type(cdef: Expr, mapdata: Map(String, Expr)) -> Expr {
+fn instanciate_custom_type(cdef: Expr, mapdata: Dict(String, Expr)) -> Expr {
   case uneval(cdef) {
     LIST([]) -> {
       LIST([])
@@ -2498,7 +2538,7 @@ fn instanciate_custom_type(cdef: Expr, mapdata: Map(String, Expr)) -> Expr {
 
     KEYWORD(key) -> {
       //dbgout2("KEYWORD:", key)
-      case map.get(mapdata, key) {
+      case dict.get(mapdata, key) {
         Ok(value) -> value
         _ -> {
           throw_err("invalid custom type")
@@ -2526,7 +2566,7 @@ pub fn bif_instanciate_custom_type(exprs: List(Expr), env: Env) -> Expr {
     }
   }
 
-  let mapdata = plist_to_map(plist, map.from_list([]))
+  let mapdata = plist_to_map(plist, dict.from_list([]))
 
   let assert CustomTypeDef(_, custom_type_def) = env_get_global(env, name)
   let instance = instanciate_custom_type(custom_type_def, mapdata)
@@ -2538,8 +2578,8 @@ pub fn bif_instanciate_custom_type(exprs: List(Expr), env: Env) -> Expr {
 fn custom_type_to_map(
   cdef: Expr,
   cval: Expr,
-  acc: Map(String, Expr),
-) -> Map(String, Expr) {
+  acc: Dict(String, Expr),
+) -> Dict(String, Expr) {
   case uneval(cdef), uneval(cval) {
     LIST([]), LIST([]) -> {
       acc
@@ -2551,7 +2591,7 @@ fn custom_type_to_map(
     }
 
     key, val -> {
-      map.insert(acc, pstr(key), val)
+      dict.insert(acc, pstr(key), val)
     }
   }
 }
@@ -2563,7 +2603,7 @@ pub fn bif_custom_type_to_map(exprs: List(Expr), env: Env) -> Expr {
   let assert CustomType(name, custom_type_value) = value
   let assert CustomTypeDef(_, custom_type_def) = env_get_global(env, name)
   let mapdata =
-    custom_type_to_map(custom_type_def, custom_type_value, map.from_list([]))
+    custom_type_to_map(custom_type_def, custom_type_value, dict.from_list([]))
   let plist = map_to_plist(mapdata, [])
   WithEnv(DICT(plist), env)
 }
@@ -2574,7 +2614,7 @@ pub fn bif_custom_type_to_map(exprs: List(Expr), env: Env) -> Expr {
 
 pub fn generate_new_env(
   pdic: PDic,
-  default_bindings: Map(String, Expr),
+  default_bindings: Dict(String, Expr),
   init_files,
 ) -> Env {
   //dbgout2("default_bindings:", default_bindings)
@@ -2597,7 +2637,9 @@ pub fn generate_new_env(
   let default_scopes = case bif_to_global_scope__ {
     True -> {
       // default bindings to process dictionary
-      map.map_values(default_bindings, fn(k, v) { process_dict_set(pdic, k, v) })
+      dict.map_values(default_bindings, fn(k, v) {
+        process_dict_set(pdic, k, v)
+      })
       [ProcessDict(pdic)]
     }
 
@@ -2610,15 +2652,16 @@ pub fn generate_new_env(
     Env(
       info: Info("toplevel", 0),
       pdic: pdic,
-      local_vars: map.from_list([]),
-      a_binding: map.from_list([]),
+      local_vars: dict.from_list([]),
+      a_binding: dict.from_list([]),
       scopes: default_scopes,
       opts: opts,
     )
 
   let env =
     list.fold(init_files, env, fn(env, file) {
-      gdb__ && {
+      gdb__
+      && {
         io.println("- init " <> file)
         True
       }
@@ -2693,6 +2736,7 @@ pub fn make_new_l4u_core_env(
         bif("vec", bif_vec),
         bif("vector", bif_vector),
         bif("vector?", bif_vectorp),
+        bif("to-hash-map", bif_to_hash_map),
         bif("hash-map", bif_hash_map),
         bif("hash-map?", bif_hash_mapp),
         bif("map?", bif_hash_mapp),
@@ -2762,7 +2806,7 @@ pub fn make_new_l4u_core_env(
       ],
       bifs,
     )
-    |> map.from_list
+    |> dict.from_list
 
   let init_files =
     list.append(["default0.lisp", "default1.lisp", "prelude.lisp"], files)
@@ -2779,7 +2823,7 @@ fn env_get_(scopes: List(Scope), key: String) -> Result(Expr, String) {
 
   case target_scope {
     Scope(bindings: bindings) -> {
-      case map.get(bindings, key) {
+      case dict.get(bindings, key) {
         Ok(value) -> {
           //dbgout3("env_get -> found:", key, value)
           Ok(value)
@@ -2819,7 +2863,7 @@ fn env_get_(scopes: List(Scope), key: String) -> Result(Expr, String) {
 }
 
 pub fn env_get(env: Env, key: String) -> Result(Expr, String) {
-  case map.get(env.local_vars, key) {
+  case dict.get(env.local_vars, key) {
     Ok(value) -> {
       //dbgout3("env_get found: ", key, value)
       Ok(value)
@@ -2827,7 +2871,7 @@ pub fn env_get(env: Env, key: String) -> Result(Expr, String) {
     Error(_) -> {
       //dbgout2("env_get: ", key)
       //env_get_(env.scopes, key)
-      case map.get(env.a_binding, key) {
+      case dict.get(env.a_binding, key) {
         Ok(value) -> {
           Ok(value)
         }
@@ -2840,13 +2884,13 @@ pub fn env_get(env: Env, key: String) -> Result(Expr, String) {
 }
 
 pub fn env_set_local(env: Env, key: String, value: Expr) -> Env {
-  Env(..env, local_vars: map.insert(env.local_vars, key, value))
+  Env(..env, local_vars: dict.insert(env.local_vars, key, value))
 }
 
 //pub fn env_set_local(env: Env, key: String, value: Expr) -> Env {
 //  case env.scopes {
 //    [Scope(bindings: local_bindings) as local_scope, ..rest_scopes] -> {
-//      let new_bindings = map.insert(local_bindings, key, value)
+//      let new_bindings = dict.insert(local_bindings, key, value)
 //      Env(..env, scopes: [Scope(new_bindings), ..rest_scopes])
 //    }
 //    _ -> {
@@ -2873,7 +2917,7 @@ pub fn env_replace_local_scope(env: Env, scope: Scope) -> Env {
 
 //pub fn env_set_global(env: Env, key: String, value: Expr) -> Env {
 //  let assert Ok(global_scope) = list.last(env.scopes)
-//  let new_bindings = map.insert(global_scope.bindings, key, value)
+//  let new_bindings = dict.insert(global_scope.bindings, key, value)
 //  let new_global = Scope(bindings: new_bindings)
 //  let new_scopes = case list.reverse(env.scopes) {
 //    [] -> [new_global]
@@ -2950,8 +2994,8 @@ pub fn env_get_global_keys(env: Env) {
 // ----------------------------------------------------------------------------
 // # utilities
 // ----------------------------------------------------------------------------
-pub fn dump_dict(dict: Map(String, Expr), env: Env) -> Bool {
-  list.each(map.to_list(dict), fn(item) {
+pub fn dump_dict(dict: Dict(String, Expr), env: Env) -> Bool {
+  list.each(dict.to_list(dict), fn(item) {
     let #(k, v) = item
     dbgout1(inspect(STRING(k)) <> " => " <> inspect(v))
   })
@@ -2959,7 +3003,8 @@ pub fn dump_dict(dict: Map(String, Expr), env: Env) -> Bool {
 }
 
 pub fn dump_env(title: String, env: Env) -> Bool {
-  dbgout1("--------------------------------------------------------------------",
+  dbgout1(
+    "--------------------------------------------------------------------",
   )
   dbgout1("# dump_env: " <> title <> " " <> info_to_str(env.info))
   dbgout2(
@@ -2971,7 +3016,8 @@ pub fn dump_env(title: String, env: Env) -> Bool {
 
 pub fn dump_closure(msg: String, expr: Expr) -> Bool {
   let assert CLOSURE(desc, params, progn, closure_env) = expr
-  dbgout1("--------------------------------------------------------------------",
+  dbgout1(
+    "--------------------------------------------------------------------",
   )
   dbgout1("# dump_closure: " <> msg <> " " <> desc.name)
   dbgout2("params:", params)
@@ -2992,9 +3038,10 @@ fn dump_scopes_keys(scopes: List(Scope)) -> String {
     [] -> ""
     [Scope(bindings)] -> "(**)"
     [Scope(bindings), ..rest] -> {
-      "[" <> string.join(map.keys(bindings), ",") <> "]" <> dump_scopes_keys(
-        rest,
-      )
+      "["
+      <> string.join(dict.keys(bindings), ",")
+      <> "]"
+      <> dump_scopes_keys(rest)
     }
     [_, ..rest] -> dump_scopes_keys(rest)
   }
@@ -3041,13 +3088,13 @@ pub fn args_to_str(args: List(Expr)) -> String {
   string.join(list.map(args, fn(arg) { to_simple_str(arg) }), " ")
 }
 
-pub fn dict_to_str(dict: Map(String, Expr)) -> String {
+pub fn dict_to_str(dict: Dict(String, Expr)) -> String {
   string.join(
-    map.to_list(dict)
-    |> list.map(fn(item) {
-      let #(k, v) = item
-      to_simple_str(STRING(k)) <> ":" <> to_simple_str(v)
-    }),
+    dict.to_list(dict)
+      |> list.map(fn(item) {
+        let #(k, v) = item
+        to_simple_str(STRING(k)) <> ":" <> to_simple_str(v)
+      }),
     ", ",
   )
 }
@@ -3068,8 +3115,8 @@ pub fn local_scopes_to_string(scopes: List(Scope), acc: List(String)) -> String 
   }
 }
 
-pub fn vars_to_string(vars: Map(String, Expr)) -> String {
-  map.to_list(vars)
+pub fn vars_to_string(vars: Dict(String, Expr)) -> String {
+  dict.to_list(vars)
   |> list.map(fn(item) {
     let #(k, v) = item
     to_simple_str(STRING(k)) <> ":" <> to_simple_str(v)
@@ -3081,11 +3128,18 @@ pub fn trace_closure_call(env: Env, callable, ecallable, bindings) -> Int {
   let ip = process_dict_get(env.pdic, "*trace_ip")
   let level = process_dict_get(env.pdic, "*trace_level")
 
-  gdb__ && env.opts.trace && {
+  gdb__
+  && env.opts.trace
+  && {
     io.println(
-      indent(level) <> "- " <> int.to_string(ip) <> ": (" <> to_simple_str(
-        callable,
-      ) <> " " <> dict_to_str(bindings) <> ")",
+      indent(level)
+      <> "- "
+      <> int.to_string(ip)
+      <> ": ("
+      <> to_simple_str(callable)
+      <> " "
+      <> dict_to_str(bindings)
+      <> ")",
     )
     // <> dump_local_vars(env) <> " " <> dump_scopes_keys(env.scopes) <> " ",
     True
@@ -3100,11 +3154,17 @@ pub fn trace_closure_return(env: Env, callable, ecallable, rexpr, ip: Int) {
   let level = process_dict_get(env.pdic, "*trace_level") - 1
   process_dict_set(env.pdic, "*trace_level", level)
 
-  gdb__ && env.opts.trace && {
+  gdb__
+  && env.opts.trace
+  && {
     io.println(
-      indent(level) <> "- " <> int.to_string(ip) <> ": " <> to_simple_str(
-        callable,
-      ) <> " returned " <> to_simple_str(rexpr),
+      indent(level)
+      <> "- "
+      <> int.to_string(ip)
+      <> ": "
+      <> to_simple_str(callable)
+      <> " returned "
+      <> to_simple_str(rexpr),
     )
     True
   }
@@ -3208,9 +3268,17 @@ fn repl_loop(env: Env, result: Result(Env, Expr), prompt: String) {
   }
 }
 
+pub fn initialize() {
+  gleam_bridge.init_gleam_bridge()
+}
+
 pub fn main() {
+  initialize()
+
   //test()
-  let env = make_new_l4u_core_env(unsafe_corece(UNDEFINED), [], [])
+  let pdic: PDic = unique_pdic()
+  let env = make_new_l4u_core_env(pdic, [], [])
+  //let env = make_new_l4u_core_env(unsafe_corece(UNDEFINED), [], [])
   repl(env, "stepA> ")
 }
 

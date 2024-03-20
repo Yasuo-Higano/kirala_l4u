@@ -35,7 +35,8 @@ l4u_to_native({vector,Value}) ->
 l4u_to_native({list,Value}) ->
     lists:map( fun(X) -> l4u_to_native(X) end, Value );
 l4u_to_native({dict,Value}) ->
-    l4u_alist_to_native(Value,maps:new());
+    NativeValues = lists:map( fun(X) -> l4u_to_native(X) end, Value ),
+    l4u_alist_to_native(NativeValues,maps:new());
 l4u_to_native({keyword,Value}) ->
     binary_to_atom(Value,utf8);
 l4u_to_native({symbol,Value}) ->
@@ -57,6 +58,10 @@ native_to_l4u({ok, Value}) ->
     {native_value,<<"ok">>,Value};
 native_to_l4u({error, Value}) ->
     {native_value,<<"error">>,Value};
+
+native_to_l4u({Type, Value}) when is_atom(Type) ->
+    %io:format("native_to_l4u: ~p ~p~n", [Type,Value]),
+    {Type,Value};
 
 native_to_l4u(true) -> true;
 native_to_l4u(false) -> false;

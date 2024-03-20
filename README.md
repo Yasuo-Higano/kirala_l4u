@@ -1,7 +1,8 @@
-# Kirala L4u(Lisp for You) for Gleam language
+# Kirala L4u(Lisp for You) for Gleam language ver 1.0.0
 - Kirara is Japanese for "gleam" feeling word in English.
 
-L4u is a embedded lisp interpreter for use in gleam/erlang and gleam/javascript products.
+L4u is a embedded lisp interpreter dialect of MAL for use in gleam/erlang and gleam/javascript products.
+
 
 This is still under construction and may undergo destructive changes.
 It is intended to work with both gleam/erlang and gleam/javascript.
@@ -17,17 +18,20 @@ In the benchmark (tarai 12 6 0), I compared it with MAL's impls/c,erlang,elixir,
 - erlang failed to complete(too many procecces)
 - elixir failed to complete(too many procecces)
 - 7 to 15 times faster than python
-- 2 to 4 times faster than ruby
+- 2 to 4 times faster than ruby  
 I think this implementation is not so bad.
-
-## development environment
-- Erlang/OTP 26
-- Gleam 0.33.0-rc1
 
 ## build
 ```
-./build.sh
+./prepare.sh
+
+# erlang target
+./set-host-language.sh --erl
+
+# javascript target 
+./set-host-language.sh --js
 ```
+
 
 ## embedding sample
 
@@ -35,7 +39,7 @@ src/examples/test_l4u.gleam
 ```
 import l4u/l4u
 import gleam/list
-import gleam/map.{Map}
+import gleam/dict.{Dict}
 import gleam/string
 import l4u/l4u_core.{
   BIF, BISPFORM, Env, Expr, STRING, WithEnv, description, pstr,
@@ -100,5 +104,5 @@ Creating qdate ETS Table: qdate_srv
 (global-keys :test)
 
 ; Call the function and start the REPL the same way you did in erlang.
-(test-l4u:main)
+(test_l4u:main)
 ```

@@ -1,40 +1,47 @@
 import gleam/io
 import gleam/list
 import gleam/dynamic
-import gleam/map.{Map}
+import gleam/dict
 import gleam/string
-import gleam/regex.{Regex}
+import gleam/regex
 import gleam/result
 import gleam/int
 import gleam/float
-import gleam/option.{None, Option, Some}
-import gleam/order.{Eq, Gt, Lt, Order}
+import gleam/option
+import gleam/order
 import l4u/sys_bridge.{
-  PDic, Pid, Ref, catch_ex, console_readline, console_writeln, dbgout1, dbgout2,
+  catch_dummy, catch_ex, console_readline, console_writeln, dbgout1, dbgout2,
   dbgout3, dbgout4, deref, do_async, error_to_string, escape_binary_string, exec,
-  exec_native, internal_form, load_file, make_ref, new_process, process_dict_get,
-  process_dict_set, reset_ref, stringify, throw_err, throw_expr, tick_count,
-  to_string, unescape_binary_string, unique_int, unique_str, unsafe_corece,
+  exec_native, internal_form, l4u_to_native, load_file, make_ref, new_process,
+  process_dict_get, process_dict_set, reset_ref, stringify, throw_err,
+  throw_expr, tick_count, to_string, unescape_binary_string, unique_int,
+  unique_pdic, unique_str,
 }
 @target(javascript)
 import gleam/javascript/promise
 import l4u/l4u_core.{
-  ATOM, BIF, BISPFORM, CLOSURE, Continuation, CustomType, DELIMITER, DICT,
-  Description, Env, Expr, FALSE, FLOAT, INT, KEYWORD, LIST, MACRO, NIL,
-  NativeValue, PRINTABLE, ReplCommand, STRING, SYMBOL, Scope, TRUE, UNDEFINED,
-  VECTOR, WithEnv, description, dump_env, env_set_global, env_set_local, eval,
-  inspect, main as do_repl, make_new_l4u_core_env, print, pstr, read, repl_print,
-  show, trace_set_last_funcall, uneval,
+  description, dump_env, env_set_global, env_set_local, eval, inspect,
+  main as do_repl, make_new_l4u_core_env, print, pstr, read, rep, repl,
+  repl_print, show, to_l4u_bool, tokenize, trace_set_last_funcall, uneval,
+}
+import l4u/l4u_type.{
+  type Env, type Expr, type PDic, BIF, BISPFORM, CustomType, LIST, NIL,
+  NativeValue, PRINTABLE, ReplCommand, STRING, SYMBOL, UNDEFINED, VECTOR,
+  WithEnv, native_false, native_nil, native_true, native_undefined,
+  to_native_dictionary, unbox_l4u, unsafe_corece,
 }
 import l4u/l4u_core as l4u
 import l4u/bif_lib.{bif_lib_def}
 import l4u/bif_string.{bif_string_def}
 import l4u/bif_file.{bif_file_def}
 import gleam_bridge
-import l4u/global
-import l4u/l4u_obj.{L4uObj}
+import l4u/union_term
+import l4u/l4u_obj.{type L4uObj}
 import l4u/bif_std.{bif_std_def}
 import l4u/bif_datetime.{bif_datetime_def}
+import l4u/bif_template.{bif_template_def}
+
+const use_std_repl__ = False
 
 const gdb__ = False
 
@@ -198,8 +205,8 @@ fn bif_native_value(exprs: List(Expr), env: Env) -> Expr {
 }
 
 fn bif_l4u_processes(exprs: List(Expr), env: Env) -> Expr {
-  let assert dict = global.get_map("*l4u_processes*")
-  let assert keys = map.keys(dict)
+  let assert dict = union_term.get_map("*l4u_processes*")
+  let assert keys = dict.keys(dict)
   WithEnv(LIST(list.map(keys, STRING)), env)
 }
 
@@ -218,7 +225,7 @@ fn bif_spawn(exprs: List(Expr), env: Env) -> Expr {
 fn bif_repl_switch(exprs: List(Expr), env: Env) -> Expr {
   let assert [name] = exprs
   let name = show(name)
-  let assert l4u = global.get_map_value("*l4u_processes*", name, UNDEFINED)
+  let assert l4u = union_term.get_map_value("*l4u_processes*", name, UNDEFINED)
   ReplCommand("repl-switch", l4u)
 }
 
@@ -235,7 +242,7 @@ pub fn make_new_l4u_env(
   additional_defs: List(#(String, Expr)),
   additional_files: List(String),
 ) -> Env {
-  let pdic: PDic = unsafe_corece(unique_int())
+  let pdic: PDic = unique_pdic()
 
   let bif = fn(name, f) { #(name, BIF(description(name), f)) }
   let bsf = fn(name, f) { #(name, BISPFORM(description(name), f)) }
@@ -264,6 +271,7 @@ pub fn make_new_l4u_env(
       bif_file_def(),
       bif_std_def(),
       bif_datetime_def(),
+      bif_template_def(),
       additional_defs,
     ]),
     list.append(files, additional_files),
@@ -289,7 +297,7 @@ pub fn generate_l4u_process(
   let l4u = l4u_obj.generate_new_l4u_obj(name, initializer)
 
   let expr_l4u = NativeValue("l4u", dynamic.from(l4u))
-  global.set_map_value("*l4u_processes*", name, dynamic.from(expr_l4u))
+  union_term.set_map_value("*l4u_processes*", name, dynamic.from(expr_l4u))
   #(l4u, expr_l4u)
 }
 
@@ -299,7 +307,9 @@ pub fn l4u_eval(l4u: L4uObj, exprs: List(Expr)) -> Expr {
 }
 
 pub fn l4u_read_eval(l4u: L4uObj, src: String) -> Result(Expr, String) {
+  //dbgout2("#### l4u_read_eval: ", src)
   let assert Ok(exprs) = l4u.read(src)
+  //dbgout2("#### l4u_read_eval exprs: ", exprs)
   l4u.eval(exprs)
 }
 
@@ -321,12 +331,12 @@ pub fn l4u_add_defs(
 }
 
 pub fn l4u_get_main_process() -> L4uObj {
-  global.get("*main-l4u*")
+  union_term.get("*main-l4u*", UNDEFINED)
   |> unsafe_corece
 }
 
 pub fn l4u_get_process(name: String) -> Result(L4uObj, String) {
-  case global.get(name) {
+  case union_term.get(name, UNDEFINED) {
     UNDEFINED -> Error("l4u_get_process: not found")
     l4u -> Ok(unsafe_corece(l4u))
   }
@@ -336,33 +346,61 @@ pub fn l4u_get_process(name: String) -> Result(L4uObj, String) {
 // # REPL
 // ----------------------------------------------------------------------------
 
-pub fn rep(src: String, l4u: L4uObj) -> Result(Expr, String) {
+pub fn l4u_rep(src: String, l4u: L4uObj) -> Result(Expr, String) {
   //let exprs = read(src, l4u.get_env())
   //let result = eval(exprs, UNDEFINED, l4u.get_env())
   let result = l4u_read_eval(l4u, src)
   result
 }
 
+pub fn l4u_rep_native(src: String, l4u: L4uObj) -> any {
+  case l4u_rep(src, l4u) {
+    Ok(result) -> {
+      l4u_to_native(result)
+    }
+    Error(err) -> {
+      unsafe_corece("Error: " <> err)
+    }
+  }
+}
+
+pub fn l4u_rep_str(src: String, l4u: L4uObj) -> String {
+  case l4u_rep(src, l4u) {
+    Ok(result) -> {
+      print(result)
+    }
+    Error(err) -> {
+      "Error: " <> err
+    }
+  }
+}
+
 @target(javascript)
-pub fn repl(l4u: L4uObj, prompt: String) {
+pub fn l4u_repl(l4u: L4uObj, prompt: String) {
   console_readline(prompt)
   |> promise.await(promise.resolve)
   |> promise.tap(fn(line) {
     let result =
-      catch_ex(fn() {
-        process_dict_set(env.pdic, "*trace_ip", 0)
-        let assert WithEnv(result, new_env) = rep(line, env)
+      catch_dummy(fn() {
+        process_dict_set(l4u.get_env().pdic, "*trace_ip", 0)
+        case l4u_rep(line, l4u) {
+          Ok(result) -> {
+            repl_print(result)
+            UNDEFINED
+          }
 
-        repl_print(result)
-        new_env
+          _ -> {
+            UNDEFINED
+          }
+        }
       })
 
-    repl_loop(env, result, prompt)
+    repl_loop(l4u, result, prompt)
   })
 }
 
 @target(erlang)
-pub fn repl(l4u: L4uObj, prompt: String) {
+pub fn l4u_repl(l4u: L4uObj, prompt: String) {
   gdb__ && trace_set_last_funcall(UNDEFINED, l4u.get_env())
   //let line = console_readline(prompt)
 
@@ -371,20 +409,27 @@ pub fn repl(l4u: L4uObj, prompt: String) {
       stringify(l4u.pid)
       |> string.replace("<", "|")
       |> string.replace(">", "|")
-    } <> "" <> l4u.name <> "|" <> prompt
+    }
+    <> ""
+    <> l4u.name
+    <> "|"
+    <> prompt
   //let str_prompt = "user> "
 
   let line = console_readline(str_prompt)
-  case string.length(string.trim(line)) {
-    0 -> {
+  case string.trim(line) {
+    "" -> {
       console_writeln("")
-      repl(l4u, prompt)
+      l4u_repl(l4u, prompt)
     }
+
+    ":exit" | ":quit" -> ""
+
     _ -> {
       let result =
         catch_ex(fn() {
           process_dict_set(l4u.get_env().pdic, "*trace_ip", 0)
-          let result = rep(line, l4u)
+          let result = l4u_rep(line, l4u)
           case result {
             Ok(res) -> {
               res
@@ -411,11 +456,11 @@ fn repl_loop(l4u: L4uObj, result: Result(Expr, Expr), prompt: String) {
     Ok(retval) -> {
       case retval {
         ReplCommand("repl-switch", NativeValue("l4u", new_l4u)) -> {
-          repl(unsafe_corece(new_l4u), prompt)
+          l4u_repl(unsafe_corece(new_l4u), prompt)
         }
         _ -> {
           repl_print(retval)
-          repl(l4u, prompt)
+          l4u_repl(l4u, prompt)
         }
       }
     }
@@ -441,7 +486,7 @@ fn repl_loop(l4u: L4uObj, result: Result(Expr, Expr), prompt: String) {
         }
       }
       exec_native(l4u.pid, print_error)
-      repl(l4u, prompt)
+      l4u_repl(l4u, prompt)
     }
   }
 }
@@ -451,30 +496,36 @@ fn repl_loop(l4u: L4uObj, result: Result(Expr, Expr), prompt: String) {
 // ----------------------------------------------------------------------------
 
 pub fn main_l4u() -> L4uObj {
-  global.get("*main-l4u*")
+  union_term.get("*main-l4u*", UNDEFINED)
   |> unsafe_corece
 }
 
+/// Initialize to generate a main L4U lisp process
 pub fn start_and_generate_main_l4u(
   additional_defs: List(#(String, Expr)),
 ) -> L4uObj {
-  gleam_bridge.init()
+  l4u_core.initialize()
 
   let #(l4u, _) = generate_l4u_process("main", additional_defs)
-  global.put("*main-l4u*", dynamic.from(l4u))
+  union_term.put("*main-l4u*", dynamic.from(l4u))
 
   l4u
 }
 
-pub fn main() {
-  start_with_defs([])
+pub fn start_with_defs(defs: List(#(String, Expr))) {
+  let l4u = start_and_generate_main_l4u(defs)
+
+  case use_std_repl__ {
+    True -> {
+      l4u_core.repl(l4u.get_env(), "lisp> ")
+    }
+    False -> {
+      l4u_repl(l4u, "l4u> ")
+    }
+  }
 }
 
-pub fn start_with_defs(defs: List(#(String, Expr))) {
-  let l4u = start_and_generate_main_l4u([])
-
-  //
-  //l4u_add_defs(l4u, defs)
-
-  repl(l4u, "l4u> ")
+pub fn main() {
+  dbgout1("## l4u: main --------------------------------------------")
+  start_with_defs([])
 }

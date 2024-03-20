@@ -394,3 +394,11 @@ set_cwd(DirPath) ->
 
 abspath(FilePath) ->
     to_bin_string( filename:absolute_name(FilePath) ).
+
+to_native_dictionary([],PList) ->
+    maps:from_list(PList);
+to_native_dictionary([Key,Value | Xs],PList) ->
+    to_native_dictionary(Xs,[{Key,Value} | PList]).
+
+to_native_dictionary(Xs) ->
+    to_native_dictionary(Xs,[]).

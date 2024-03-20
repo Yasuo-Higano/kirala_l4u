@@ -7,7 +7,8 @@ WORK_DIR=/usr/local/src
 cd $WORK_DIR
 
 #VER='v0.32.4'
-VER='v0.33.0-rc1'
+#VER='v0.33.0-rc1'
+VER='v0.33.0'
 ARCH=$(uname -m)
 
 apt update

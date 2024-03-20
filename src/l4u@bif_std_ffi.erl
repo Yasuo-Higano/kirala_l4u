@@ -5,7 +5,7 @@
 json_format(Expr) ->
     NativeExpression = l4u_to_native(Expr),
     %io:format("NativeExpression: ~p~n", [NativeExpression]),
-    JsonString = jsone:encode(NativeExpression),
+    JsonString = jsone:encode(NativeExpression,[native_utf8]),
     %io:format(": ~p~n", [NativeExpression]),
     to_bin_string(JsonString).
 

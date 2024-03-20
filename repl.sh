@@ -3,7 +3,7 @@
 SCRIPT_DIR=$(cd $(dirname $0); pwd)
 cd $SCRIPT_DIR
 
-RLWRAP=rlwrap
+RLWRAP="rlwrap --history-filename=.l4u-history --file=lisp.completion --always-readline --no-children"
 
 #while :
 #do
@@ -30,11 +30,13 @@ while :
 do
   case "$1" in
     "--js" | "--javascript")
-        $RLWRAP ./run-js.sh
+        gleam build --target javascript
+        $RLWRAP gleam run --target javascript
         exit 0
       ;;
     "--erl" | "--erlang")
-        $RLWRAP ./run-erl.sh
+        gleam build --target erlang
+        $RLWRAP gleam run --target erlang
         exit 0
       ;;
     *)

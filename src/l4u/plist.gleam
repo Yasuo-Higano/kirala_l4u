@@ -1,29 +1,30 @@
 import gleam/io
 import gleam/list
-import gleam/map.{Map}
+import gleam/dict
 import gleam/string
-import gleam/regex.{Regex}
+import gleam/regex
 import gleam/result
 import gleam/int
 import gleam/float
-import gleam/dynamic.{Dynamic}
-import gleam/option.{None, Option, Some}
-import gleam/order.{Eq, Gt, Lt, Order}
+import gleam/dynamic
+import gleam/option.{type Option, None, Some}
+import gleam/order
 @target(javascript)
 import gleam/javascript/promise
 import l4u/sys_bridge.{
-  PDic, Pid, Ref, abspath, catch_ex, console_readline, console_writeln, dbgout1,
-  dbgout2, dbgout3, deref, dir_exists, do_async, file_exists, get_cwd,
-  internal_form, l4u_to_native, load_file, make_ref, native_to_l4u, os_cmd,
-  process_dict_get, process_dict_keys, process_dict_set, reset_ref, set_cwd,
-  throw_err, throw_expr, unsafe_corece,
+  abspath, catch_ex, console_readline, console_writeln, dbgout1, dbgout2,
+  dbgout3, deref, dir_exists, do_async, file_exists, get_cwd, internal_form,
+  l4u_to_native, load_file, make_ref, native_to_l4u, os_cmd, process_dict_get,
+  process_dict_keys, process_dict_set, reset_ref, set_cwd, throw_err, throw_expr,
 }
 import l4u/l4u_core.{
-  ATOM, BIF, BISPFORM, CLOSURE, Continuation, DELIMITER, DICT, Description, Env,
-  Expr, FALSE, FLOAT, INT, KEYWORD, LIST, MACRO, NIL, NativeFunction,
-  NativeValue, STRING, SYMBOL, Scope, TRUE, UNDEFINED, VECTOR, WithEnv,
-  description, env_set_global, env_set_local, eval, inspect, main as do_repl,
-  make_new_l4u_core_env, print, pstr, show, to_l4u_bool, uneval,
+  description, dump_env, env_set_global, env_set_local, eval, inspect,
+  main as do_repl, make_new_l4u_core_env, print, pstr, rep, repl,
+  trace_set_last_funcall, uneval,
+}
+import l4u/l4u_type.{
+  type Expr, FALSE, INT, TRUE, native_false, native_nil, native_true,
+  native_undefined, to_native_dictionary, unsafe_corece,
 }
 import l4u/l4u_core as l4u
 

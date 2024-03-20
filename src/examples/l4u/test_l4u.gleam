@@ -1,10 +1,13 @@
 import l4u/l4u
 import gleam/list
-import gleam/map.{Map}
+import gleam/dict
 import gleam/string
 import l4u/l4u_core.{
-  BIF, BISPFORM, Env, Expr, STRING, WithEnv, description, pstr,
+  description, dump_env, env_set_global, env_set_local, eval, inspect,
+  main as do_repl, make_new_l4u_core_env, print, pstr, read, rep, repl,
+  repl_print, show, to_l4u_bool, tokenize, trace_set_last_funcall, uneval,
 }
+import l4u/l4u_type.{type Env, type Expr, BIF, BISPFORM, STRING, WithEnv}
 
 fn bif_hello(exprs: List(Expr), env: Env) -> Expr {
   let names =
@@ -31,5 +34,5 @@ pub fn main() {
   ]
 
   let l4uobj = l4u.start_and_generate_main_l4u(defs)
-  l4u.repl(l4uobj, "l4u> ")
+  l4u.l4u_repl(l4uobj, "l4u> ")
 }

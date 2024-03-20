@@ -1,14 +1,14 @@
 import gleam/list
-import l4u/sys_bridge
 @target(javascript)
 import gleam/javascript/array
-import l4u/l4u_core.{
-  ATOM, BIF, BISPFORM, CLOSURE, Continuation, DELIMITER, DICT, Env, Expr, FALSE,
-  FLOAT, INT, KEYWORD, LIST, MACRO, NIL, STRING, SYMBOL, Scope, TRUE, UNDEFINED,
-  VECTOR, WithEnv, dump_env, env_set_global, env_set_local, eval, inspect,
-  main as do_repl, make_new_l4u_core_env, print, rep, repl,
-  trace_set_last_funcall,
+import l4u/l4u_type.{
+  FALSE, NIL, SYMBOL, TRUE, UNDEFINED, box_l4u_custom_type,
+  box_l4u_custom_type_def, box_l4u_dict, box_l4u_float, box_l4u_int,
+  box_l4u_keyword, box_l4u_list, box_l4u_native_function, box_l4u_native_value,
+  box_l4u_ok, box_l4u_string, box_l4u_symbol, box_l4u_vector, unbox_l4u,
 }
+@target(javascript)
+import l4u/sys_bridge.{set_gleam_bridge}
 
 pub fn return_ok(value: any) -> Result(any, error) {
   Ok(value)
@@ -19,25 +19,43 @@ pub fn return_error(value: error) -> Result(any, error) {
 }
 
 @target(javascript)
-pub fn init() {
+pub fn init_gleam_bridge() {
   let bridge = [#("return_ok", return_ok), #("return_error", return_error)]
 
   list.each(bridge, fn(i) {
     let #(key, value) = i
-    l4u_sys_bridge.set_gleam_bridge(key, value)
+    set_gleam_bridge(key, value)
   })
 
   //
-  l4u_sys_bridge.set_gleam_bridge("array_to_list", array.to_list)
-  l4u_sys_bridge.set_gleam_bridge("string_to_symbol", SYMBOL)
-  l4u_sys_bridge.set_gleam_bridge("UNDEFINED", UNDEFINED)
-  l4u_sys_bridge.set_gleam_bridge("TRUE", TRUE)
-  l4u_sys_bridge.set_gleam_bridge("FALSE", FALSE)
-  l4u_sys_bridge.set_gleam_bridge("NIL", NIL)
+  set_gleam_bridge("array_to_list", array.to_list)
+  set_gleam_bridge("string_to_symbol", SYMBOL)
+  set_gleam_bridge("UNDEFINED", UNDEFINED)
+  set_gleam_bridge("TRUE", TRUE)
+  set_gleam_bridge("FALSE", FALSE)
+  set_gleam_bridge("NIL", NIL)
+
+  //
+  set_gleam_bridge("int", box_l4u_int)
+  set_gleam_bridge("float", box_l4u_float)
+  set_gleam_bridge("string", box_l4u_string)
+  set_gleam_bridge("symbol", box_l4u_symbol)
+  set_gleam_bridge("keyword", box_l4u_keyword)
+  set_gleam_bridge("list", box_l4u_list)
+  set_gleam_bridge("vector", box_l4u_vector)
+  set_gleam_bridge("dict", box_l4u_dict)
+  set_gleam_bridge("native_value", box_l4u_native_value)
+  set_gleam_bridge("native_function", box_l4u_native_function)
+  set_gleam_bridge("custom_type", box_l4u_custom_type)
+  set_gleam_bridge("custom_type_def", box_l4u_custom_type_def)
+  set_gleam_bridge("Ok", box_l4u_ok)
+
+  set_gleam_bridge("l4u_to_native", unbox_l4u)
+
   True
 }
 
 @target(erlang)
-pub fn init() {
+pub fn init_gleam_bridge() {
   True
 }

@@ -45,6 +45,8 @@
 (defn cadar [x] (car (cdr (car x))))
 (defn caddr [x] (car (cdr (cdr x))))
 (defn caddar [x] (car (cdr (cdr (car x)))))
+(defn cddr [x] (cdr (cdr x)))
+(defn cdddr [x] (cdr (cdr (cdr x))))
 
 (def! case case*)
 

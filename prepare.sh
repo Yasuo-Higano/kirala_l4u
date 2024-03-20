@@ -12,5 +12,10 @@ gleam add gleam_stdlib
 # -------------------------
 gleam add qdate
 gleam add jsone
+gleam add bbmustache
+gleam add gleam_bbmustache
+
+# javascript
+npm install mustache --save
 
 
